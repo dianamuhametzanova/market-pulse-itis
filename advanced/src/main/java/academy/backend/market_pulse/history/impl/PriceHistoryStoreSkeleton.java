@@ -1,33 +1,105 @@
-package academy.backend.market_pulse.history.impl;
 
-import java.nio.file.Path;
-import java.util.List;
+package academy.backend.market_pulse.history.impl;
 
 import academy.backend.market_pulse.history.PriceHistoryStore;
 import academy.backend.market_pulse.history.PricePoint;
 
-/**
- * Заготовка для самостоятельной работы (см. «Требования к файловому хранилищу.md», семинар 7) —
- * структура есть, решения нет. Формат файла — на ваш выбор (бинарный, текстовый и т.д.); главное,
- * чтобы каждый {@link #append} создавал НОВЫЙ файл (не переписывал предыдущий) и
- * {@link #load(Path, String)} возвращал все сохранённые точки по тикеру в порядке возрастания
- * времени. Проверьте себя тестом {@code PriceHistoryStoreContractTest} (замените в нём эталонную
- * реализацию на свою).
- */
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
 public class PriceHistoryStoreSkeleton implements PriceHistoryStore {
 
     @Override
     public Path append(Path directory, PricePoint point) {
-        // TODO: записать точку в новый файл внутри directory — существующие файлы не трогать.
-        //  Подсказка: имя файла на основе point.timestamp() даёт сортировку по имени = сортировку
-        //  по времени.
-        throw new UnsupportedOperationException("TODO: реализовать запись точки истории цены");
+        try {
+            Files.createDirectories(directory);
+
+            String baseName = point.ticker() + "_"
+                    + point.timestamp().toEpochMilli();
+
+            Path file = directory.resolve(baseName + ".txt");
+            int counter = 1;
+
+            while (Files.exists(file)) {
+                file = directory.resolve(baseName + "_" + counter + ".txt");
+                counter++;
+            }
+
+            List<String> lines = List.of(
+                    point.ticker(),
+                    point.timestamp().toString(),
+                    point.price().toPlainString()
+            );
+
+            Files.write(
+                    file,
+                    lines,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE
+            );
+
+            return file;
+
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                    "Не удалось сохранить точку истории", e);
+        }
     }
 
     @Override
     public List<PricePoint> load(Path directory, String ticker) {
-        // TODO: прочитать все точки по тикеру в порядке возрастания времени.
-        //  Если для тикера ещё нет точек — вернуть пустой список, а не бросать исключение.
-        throw new UnsupportedOperationException("TODO: реализовать чтение истории цены");
+        List<PricePoint> points = new ArrayList<>();
+
+        if (!Files.isDirectory(directory)) {
+            return points;
+        }
+
+        try (var files = Files.list(directory)) {
+            files.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString()
+                            .startsWith(ticker + "_"))
+                    .forEach(path -> {
+                        try {
+                            List<String> lines = Files.readAllLines(
+                                    path, StandardCharsets.UTF_8);
+
+                            if (lines.size() != 3) {
+                                throw new IllegalArgumentException(
+                                        "Некорректный файл истории: " + path);
+                            }
+
+                            PricePoint point = new PricePoint(
+                                    lines.get(0),
+                                    Instant.parse(lines.get(1)),
+                                    new BigDecimal(lines.get(2))
+                            );
+
+                            if (point.ticker().equals(ticker)) {
+                                points.add(point);
+                            }
+
+                        } catch (IOException e) {
+                            throw new UncheckedIOException(
+                                    "Не удалось прочитать файл: " + path, e);
+                        }
+                    });
+
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                    "Не удалось прочитать историю цен", e);
+        }
+
+        points.sort(Comparator.comparing(PricePoint::timestamp));
+        return points;
     }
 }

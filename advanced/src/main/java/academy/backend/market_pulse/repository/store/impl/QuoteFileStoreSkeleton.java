@@ -1,32 +1,95 @@
+
 package academy.backend.market_pulse.repository.store.impl;
 
-import java.nio.file.Path;
-import java.util.List;
-
+import academy.backend.market_pulse.factory.InstrumentFactories;
+import academy.backend.market_pulse.model.Currency;
+import academy.backend.market_pulse.model.Instrument;
 import academy.backend.market_pulse.model.Quote;
 import academy.backend.market_pulse.repository.store.QuoteFileStore;
 
-/**
- * Заготовка для самостоятельной работы (см. «Требования к файловому хранилищу.md», семинар 7) —
- * структура есть, решения нет. Формат файла — на ваш выбор (JSON, CSV, построчный текст); главное,
- * чтобы {@code load(save(quotes))} возвращал те же котировки. Проверьте себя тестом
- * {@code QuoteFileStoreContractTest} (замените в нём эталонную реализацию на свою).
- */
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
 public class QuoteFileStoreSkeleton implements QuoteFileStore {
 
     @Override
     public void save(Path path, List<Quote> quotes) {
-        // TODO: сохранить котировки в файл по указанному пути.
-        //  Подсказка: на каждую котировку нужно сохранить тикер, тип и валюту инструмента (чтобы
-        //  потом восстановить его через InstrumentFactories.create), а также цену и изменение за
-        //  период — этого достаточно, чтобы собрать Quote обратно.
-        throw new UnsupportedOperationException("TODO: реализовать сохранение котировок в файл");
+        try {
+            Path parent = path.toAbsolutePath().getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+
+            List<String> lines = new ArrayList<>();
+
+            for (Quote quote : quotes) {
+                Instrument instrument = quote.getInstrument();
+
+                String line = String.join(";",
+                        instrument.getType(),
+                        instrument.getTicker(),
+                        instrument.getName(),
+                        instrument.getCurrency().name(),
+                        quote.getPrice().toPlainString(),
+                        quote.getChangePercent().toPlainString()
+                );
+
+                lines.add(line);
+            }
+
+            Files.write(path, lines, StandardCharsets.UTF_8);
+
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                    "Не удалось сохранить котировки", e);
+        }
     }
 
     @Override
     public List<Quote> load(Path path) {
-        // TODO: прочитать котировки из файла и восстановить при старте.
-        //  Если файла ещё нет (первый запуск) — вернуть пустой список, а не бросать исключение.
-        throw new UnsupportedOperationException("TODO: реализовать чтение котировок из файла");
+        if (!Files.exists(path)) {
+            return new ArrayList<>();
+        }
+
+        try {
+            List<Quote> quotes = new ArrayList<>();
+
+            for (String line :
+                    Files.readAllLines(path, StandardCharsets.UTF_8)) {
+
+                String[] fields = line.split(";", -1);
+
+                if (fields.length != 6) {
+                    throw new IllegalArgumentException(
+                            "Некорректная запись котировки: " + line);
+                }
+
+                String type = fields[0];
+                String ticker = fields[1];
+                String name = fields[2];
+                Currency currency = Currency.valueOf(fields[3]);
+
+                BigDecimal price = new BigDecimal(fields[4]);
+                BigDecimal changePercent = new BigDecimal(fields[5]);
+
+                Instrument instrument = InstrumentFactories.create(
+                        type, ticker, name, currency);
+
+                quotes.add(new Quote(
+                        instrument, price, changePercent));
+            }
+
+            return quotes;
+
+        } catch (IOException e) {
+            throw new UncheckedIOException(
+                    "Не удалось прочитать котировки", e);
+        }
     }
 }
